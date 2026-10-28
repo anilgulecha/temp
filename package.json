@@ -1,0 +1,21 @@
+{
+  "name": "@kalviumjr/agent100",
+  "version": "2.0.0-spike.0",
+  "description": "Try-out of Agent 100 2.0 (not published): real bash and files on your computer for KiteRooms labs",
+  "type": "module",
+  "bin": {
+    "a100": "a100.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "files": [
+    "a100.mjs",
+    "windows.mjs"
+  ],
+  "license": "UNLICENSED",
+  "private": true,
+  "scripts": {
+    "test": "node test.mjs"
+  }
+}

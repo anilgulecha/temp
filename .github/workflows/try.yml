@@ -1,0 +1,61 @@
+# Agent 100 2.0 try-out on real macOS and Windows runners. Each job starts Agent 100 the way a student would and runs
+# its own HTTP test (test.mjs): pairing, the home-folder fence, files, real bash, timeout, Stop, reattach, read-only
+# Teacher. No browser, no model, no keys.
+name: try
+on: [push, workflow_dispatch]
+permissions: { contents: read }
+jobs:
+  mac:
+    strategy: { fail-fast: false, matrix: { os: [macos-latest, macos-15-intel] } }
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with: { node-version: 22 }
+      - name: Plain macOS facts
+        run: sw_vers; uname -m; echo "$SHELL"; bash --version | head -1; node --version; command -v bwrap || echo "no bubblewrap (Teacher's changes are reported, not blocked)"
+      - name: Test from the checkout (node a100.mjs)
+        run: node test.mjs
+      - name: Test through npx from GitHub (as a student would, before it is on npm)
+        run: node test.mjs --port 4798 --cmd "npx -y github:${{ github.repository }}#${{ github.sha }}"
+
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with: { node-version: 22 }
+      - name: Windows facts
+        shell: pwsh
+        run: |
+          [System.Environment]::OSVersion.VersionString; node --version
+          wsl.exe --version; wsl.exe --list --verbose; "wsl exit: $LASTEXITCODE"
+      # The launcher installs WSL + Ubuntu itself when there is none (--yes). The hosted runner cannot answer Ubuntu's
+      # first-user prompt, so after the install this CI-only step makes an ordinary default user, as a student would.
+      - name: First run (installs WSL and Ubuntu if missing)
+        shell: pwsh
+        run: |
+          node test.mjs --no-home --timeout 1500 --cmd "node a100.mjs"
+          "first run exit: $LASTEXITCODE (expected 1 when Ubuntu still needs its first user)"
+          exit 0
+      - name: CI only - create the Linux user Ubuntu's first launch would ask for
+        shell: pwsh
+        run: |
+          wsl.exe --list --verbose
+          wsl.exe -u root --exec sh -c "id -u student >/dev/null 2>&1 || useradd --create-home --shell /bin/bash student; printf '[user]\ndefault=student\n' >> /etc/wsl.conf"
+          wsl.exe --shutdown
+          wsl.exe --exec id
+      - name: Test on Windows (node a100.mjs → WSL; installs Node in WSL)
+        shell: pwsh
+        run: node test.mjs --no-home --timeout 900 --cmd "node a100.mjs"
+      - name: Test on Windows through npx from GitHub
+        shell: pwsh
+        run: node test.mjs --no-home --port 4798 --cmd "npx -y github:${{ github.repository }}#${{ github.sha }}"
+      - name: Inside WSL itself (a student who already uses WSL runs npx there)
+        shell: pwsh
+        run: |
+          $sha = "${{ github.sha }}"; $repo = "${{ github.repository }}"
+          wsl.exe --cd ~ --exec bash -lc "export PATH=`$HOME/.local/share/agent100/node-v24.21.0/bin:`$PATH; node --version; git --version || (echo 'no git in WSL'); cd ~ && rm -rf try && git clone -q https://github.com/$repo try && cd try && git checkout -q $sha && node test.mjs --port 4796 --cmd 'npx -y github:$repo#$sha'"
+          exit $LASTEXITCODE
