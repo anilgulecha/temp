@@ -1,6 +1,6 @@
 // Agent 100's own test: starts it (the way a student does, or a given command) and checks its HTTP answers: pairing,
-// the home-folder fence, files, real bash (output, exit codes, timeout, Stop), a repeated command reattaching, the
-// Teacher's read-only lab folder, ping. No browser. Exits nonzero on any failure.
+// the home-folder fence, files, real bash (output, exit codes, timeout, Stop), a repeated command reattaching, ping,
+// stopping with its terminal. No browser. Exits nonzero on any failure.
 //   node test.mjs                       run ./a100.mjs with node, in a throwaway home folder
 //   node test.mjs --cmd "npx -y …"      start Agent 100 with this command instead (it must accept --port and --home)
 //   node test.mjs --no-home             use the real home folder (Windows: Agent 100 lives in WSL, with its own home)
@@ -37,7 +37,7 @@ try {
   check('prints the pairing code', printed.includes(`a100-${PORT}-${TOKEN}`));
   check('ping', (await call('ping')).value !== undefined);
   const hello = (await call('hello')).value;
-  check('hello', !!hello?.home && !!hello?.root, JSON.stringify({ os: hello?.os, home: hello?.home, windows: hello?.windows, readonlyTeacher: hello?.readonlyTeacher }));
+  check('hello', !!hello?.home && !!hello?.root, JSON.stringify({ os: hello?.os, home: hello?.home, windows: hello?.windows, }));
   const H = hello.home, R = hello.root;
   check('wrong code refused', (await post('ping', {}, 'wrong-token-0123456789abcdef')).status === 401);
   const rebound = await new Promise((ok) => request({ host: '127.0.0.1', port: PORT, path: '/ping', method: 'POST', headers: { host: `evil.example:${PORT}`, authorization: `Bearer ${TOKEN}` } }, (res) => { res.resume(); ok(res.statusCode); }).on('error', () => ok(0)).end('{}'));
@@ -53,7 +53,9 @@ try {
   check('read back the same bytes', Buffer.from((await call('read', { path: `${lab}/dir/a.txt` })).value?.b64 ?? '', 'base64').equals(bytes));
   check('stat', (await call('stat', { path: `${lab}/dir/a.txt` })).value?.size === bytes.length);
   check('list', (await call('list', { path: `${lab}/dir` })).value?.map((f) => f.name).join() === 'a.txt');
-  check('tree', JSON.stringify((await call('tree', { path: lab })).value).includes('dir/a.txt'));
+  const t = JSON.stringify((await call('tree', { path: lab })).value);
+  const entry = JSON.parse(t)[0]?.children?.find((e) => e.path === 'dir/a.txt');
+  check('tree, with sizes and modification times', entry?.size === bytes.length && entry?.mtimeMs > 0, JSON.stringify(entry));
   check('missing file → not_found', (await call('read', { path: `${lab}/nope.txt` })).error?.code === 'not_found');
 
   // The fence: outside home, .. and symlinks out.
@@ -86,10 +88,6 @@ try {
   const c = await exec({ call: 'b6', command: 'ignored', cwd: lab });
   const runs = Buffer.from((await call('read', { path: `${lab}/runs.txt` })).value?.b64 ?? '', 'base64').toString();
   check('same call again: reattached, ran once', a.out === 'ok\n' && b.out === 'ok\n' && c.out === 'ok\n' && runs === 'run\n', JSON.stringify(runs));
-  // The Teacher's commands cannot change the lab folder (or are reported when bubblewrap is missing).
-  r = await exec({ call: 't1', command: 'echo x > teacher.txt; echo rc=$?', cwd: lab, readonly: lab });
-  const wrote = (await call('stat', { path: `${lab}/teacher.txt` })).error?.code !== 'not_found';
-  check(`Teacher read-only (${hello.readonlyTeacher ? 'enforced' : 'reported'})`, hello.readonlyTeacher ? !wrote && /rc=1/.test(r.out) : wrote && /may not change files/.test(r.out), r.out.trim().replace(/\n/g, ' · '));
   check('remove', (await call('remove', { path: `${lab}/dir`, recursive: true })).value !== undefined && (await call('stat', { path: `${lab}/dir` })).error?.code === 'not_found');
   check('clear the lab folder', (await call('clear', { name: 'test-lab' })).value !== undefined && (await call('list', { path: lab })).value?.length === 0);
   // Closing the terminal (its input ends; on Windows the launcher passes that on into WSL) stops Agent 100.

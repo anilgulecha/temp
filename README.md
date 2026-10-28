@@ -36,6 +36,8 @@ node test.mjs --no-home --cmd "node a100.mjs"             # Windows: Agent 100 r
 - files
 - real bash: output, exit codes, environment variables, timeout, Stop
 - running a command once when it is asked again (a page reload)
-- the Teacher's read-only lab folder
+- stopping when its terminal closes
+
+Agent 100 has no rules about Teachers or students. Those belong to the lab page.
 
 The `try` workflow runs it on macOS (Apple silicon and Intel) and on Windows, both directly and through WSL.

@@ -1,13 +1,14 @@
 #!/usr/bin/env node
 // Agent 100 2.0 (spike): real bash and files on this computer for a KiteRooms lab. The lab page (Pi, the model, the
-// Teacher, the conversation) stays in the browser; this only runs commands and file actions it asks for, on loopback,
+// Teacher, the conversation, every rule about who may do what) stays in the browser; this only runs the commands and
+// file actions the page asks for, on loopback,
 // for a page that has the pairing code. No dependencies. Linux and macOS run it directly; on Windows it runs itself
 // inside WSL (windows.mjs), so the Agent always gets a real bash.
 //   File actions: anywhere under your home folder (symlinks resolved). Commands: real bash as you, starting in the
-//   lab's folder under ~/kiterooms (bash itself is not confined). The Teacher's commands cannot change the lab folder.
+//   lab's folder under ~/kiterooms (bash itself is not confined).
 //   Each command is keyed by its tool call: asking again (after a reload) reattaches to it or returns its result.
 import { createServer } from 'node:http';
-import { spawn, spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { homedir, tmpdir, platform, constants } from 'node:os';
 import { mkdir, readFile, writeFile, readdir, stat, lstat, realpath, rm, mkdtemp } from 'node:fs/promises';
@@ -32,8 +33,6 @@ function pairingToken() {
   mkdirSync(dir, { recursive: true, mode: 0o700 }); const t = randomBytes(18).toString('base64url'); writeFileSync(file, t, { mode: 0o600 }); return t;
 }
 const TOKEN = Buffer.from(pairingToken());
-// bubblewrap, when it works here, makes the lab folder read-only for the Teacher's commands; otherwise changes are reported.
-const BWRAP = spawnSync('bwrap', ['--ro-bind', '/', '/', '--dev', '/dev', 'true']).status === 0;
 const WINDOWS = process.env.WSL_DISTRO_NAME && `\\\\wsl.localhost\\${process.env.WSL_DISTRO_NAME}${ROOT.replaceAll('/', '\\')}`;
 const SKIP = new Set(['.git', 'node_modules', '__pycache__', '.venv', 'venv', '.cache']); // listed, not walked
 
@@ -59,19 +58,14 @@ async function tree(dir, base = dir, budget = { n: 3000 }) {
   for (const n of (await readdir(dir)).sort()) {
     if (--budget.n < 0) break;
     const p = join(dir, n), s = await lstat(p), rel = p.slice(base.length + 1);
-    out.push(s.isDirectory() ? { path: rel, dir: true, children: SKIP.has(n) ? [] : await tree(p, base, budget) } : { path: rel, size: s.size });
+    out.push(s.isDirectory() ? { path: rel, dir: true, children: SKIP.has(n) ? [] : await tree(p, base, budget) } : { path: rel, size: s.size, mtimeMs: s.mtimeMs });
   }
-  return out;
-}
-async function snapshot(dir, base = dir, out = new Map()) { // size and time of every file, to see what a command changed
-  for (const n of await readdir(dir).catch(() => [])) { const p = join(dir, n), s = await lstat(p);
-    if (s.isDirectory()) { if (!SKIP.has(n)) await snapshot(p, base, out); } else out.set(p.slice(base.length + 1), `${s.size}:${s.mtimeMs}`); }
   return out;
 }
 
 const ops = {
   ping: async () => ({}), // the page asks once a second, to show when Agent 100 is gone
-  hello: async () => ({ version: VERSION, home: HOME, root: ROOT, windows: WINDOWS || null, os: platform(), readonlyTeacher: BWRAP }),
+  hello: async () => ({ version: VERSION, home: HOME, root: ROOT, windows: WINDOWS || null, os: platform() }),
   folder: async ({ name }) => { const p = folderPath(name); await mkdir(p, { recursive: true }); return { path: await realpath(p), files: (await readdir(p)).length }; },
   clear: async ({ name }) => { const p = folderPath(name); await rm(p, { recursive: true, force: true }); await mkdir(p, { recursive: true }); return {}; },
   stat: async ({ path }) => info(await safe(path)),
@@ -88,25 +82,20 @@ const ops = {
 
 // Commands, keyed by the page's tool call. Output is kept (its last 2 MB) so a page that reloads can reattach.
 const runs = new Map();
-async function begin(call, { command, cwd, env, timeout, readonly }) {
+async function begin(call, { command, cwd, env, timeout }) {
   const r = { out: [], size: 0, subs: new Set(), done: null, why: null };
   runs.set(call, r);
   const emit = (m) => { r.out.push(m); r.size += m.o.length; while (r.size > 2e6 && r.out.length > 1) r.size -= r.out.shift().o.length; for (const s of r.subs) s(m); };
   const finish = (m) => { if (r.done) return; r.done = m; r.at = Date.now(); for (const s of r.subs) s(m); r.subs.clear(); prune(); };
   try {
-    const dir = await safe(cwd), lab = readonly && (await safe(readonly));
-    const jail = lab && BWRAP ? ['bwrap', '--bind', '/', '/', '--ro-bind', lab, lab, '--dev', '/dev', '--proc', '/proc', '--'] : [];
-    const before = lab && !BWRAP ? await snapshot(lab) : null;
-    const child = spawn(jail[0] ?? 'bash', [...jail.slice(1), ...(jail.length ? ['bash'] : []), '-c', String(command)],
-      { cwd: dir, env: { ...process.env, ...env }, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
+    const dir = await safe(cwd);
+    const child = spawn('bash', ['-c', String(command)], { cwd: dir, env: { ...process.env, ...env }, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
     r.kill = (why) => { r.why ??= why; try { process.kill(-child.pid, 'SIGKILL'); } catch {} };
     const timer = timeout > 0 && setTimeout(() => r.kill('timeout'), timeout * 1000);
     for (const s of ['stdout', 'stderr']) child[s].setEncoding('utf8').on('data', (o) => emit({ o, s }));
     child.on('error', (e) => finish({ error: { code: 'spawn_error', message: e.message } }));
-    child.on('close', async (code, signal) => {
+    child.on('close', (code, signal) => {
       clearTimeout(timer);
-      if (before) { const after = await snapshot(lab), changed = [...new Set([...before.keys(), ...after.keys()])].filter((k) => before.get(k) !== after.get(k));
-        if (changed.length) emit({ o: `\n[Agent 100: the Teacher may not change files, but this command changed: ${changed.slice(0, 10).join(', ')}]\n`, s: 'stderr' }); }
       finish(r.why ? { error: { code: r.why, message: r.why === 'timeout' ? `timed out after ${timeout} s` : 'stopped' } } : { exit: code ?? 128 + (constants.signals[signal] ?? 0) });
     });
   } catch (e) { r.kill = () => {}; finish({ error: { code: e.code === 'permission_denied' || e.code === 'not_found' ? 'spawn_error' : 'unknown', message: e.message } }); }
