@@ -92,6 +92,11 @@ try {
   check(`Teacher read-only (${hello.readonlyTeacher ? 'enforced' : 'reported'})`, hello.readonlyTeacher ? !wrote && /rc=1/.test(r.out) : wrote && /may not change files/.test(r.out), r.out.trim().replace(/\n/g, ' · '));
   check('remove', (await call('remove', { path: `${lab}/dir`, recursive: true })).value !== undefined && (await call('stat', { path: `${lab}/dir` })).error?.code === 'not_found');
   check('clear the lab folder', (await call('clear', { name: 'test-lab' })).value !== undefined && (await call('list', { path: lab })).value?.length === 0);
+  // Closing the terminal (its input ends; on Windows the launcher passes that on into WSL) stops Agent 100.
+  try { child.stdin.end(); } catch {}
+  if (platform() !== 'win32') try { process.kill(-child.pid, 'SIGHUP'); } catch {}
+  let gone = false; for (let i = 0; i < 40 && !gone; i++) { await new Promise((x) => setTimeout(x, 250)); gone = !(await fetch(`${B}/ping`, { method: 'OPTIONS' }).then(() => true, () => false)); }
+  check('stops when its terminal closes', gone);
 } catch (e) { check('no unexpected error', false, `${e.stack}\n--- Agent 100 printed:\n${printed.slice(-2000)}`); }
 clearTimeout(deadline); stopAll();
 console.log(`\n${results.length - failed}/${results.length} passed on ${platform()}${process.env.WSL_DISTRO_NAME ? ` (WSL ${process.env.WSL_DISTRO_NAME})` : ''}`);
