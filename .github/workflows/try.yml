@@ -17,8 +17,8 @@ jobs:
         run: sw_vers; uname -m; echo "$SHELL"; bash --version | head -1; node --version; command -v bwrap || echo "no bubblewrap (Teacher's changes are reported, not blocked)"
       - name: Test from the checkout (node a100.mjs)
         run: node test.mjs
-      - name: Test through npx from GitHub (as a student would, before it is on npm)
-        run: node test.mjs --port 4798 --cmd "npx -y github:${{ github.repository }}#${{ github.sha }}"
+      - name: Test through npx (a tarball URL, as npm serves a published package)
+        run: node test.mjs --port 4798 --cmd "npx -y https://github.com/${{ github.repository }}/archive/${{ github.sha }}.tar.gz"
 
   windows:
     runs-on: windows-latest
@@ -31,7 +31,7 @@ jobs:
         shell: pwsh
         run: |
           [System.Environment]::OSVersion.VersionString; node --version
-          wsl.exe --version; wsl.exe --list --verbose; "wsl exit: $LASTEXITCODE"
+          wsl.exe --version; wsl.exe --list --verbose; "wsl --list exit: $LASTEXITCODE (nonzero: no distribution yet)"; exit 0
       # The launcher installs WSL + Ubuntu itself when there is none (--yes). The hosted runner cannot answer Ubuntu's
       # first-user prompt, so after the install this CI-only step makes an ordinary default user, as a student would.
       - name: First run (installs WSL and Ubuntu if missing)
@@ -50,12 +50,12 @@ jobs:
       - name: Test on Windows (node a100.mjs → WSL; installs Node in WSL)
         shell: pwsh
         run: node test.mjs --no-home --timeout 900 --cmd "node a100.mjs"
-      - name: Test on Windows through npx from GitHub
+      - name: Test on Windows through npx (a tarball URL)
         shell: pwsh
-        run: node test.mjs --no-home --port 4798 --cmd "npx -y github:${{ github.repository }}#${{ github.sha }}"
+        run: node test.mjs --no-home --port 4798 --cmd "npx -y https://github.com/${{ github.repository }}/archive/${{ github.sha }}.tar.gz"
       - name: Inside WSL itself (a student who already uses WSL runs npx there)
         shell: pwsh
         run: |
           $sha = "${{ github.sha }}"; $repo = "${{ github.repository }}"
-          wsl.exe --cd ~ --exec bash -lc "export PATH=`$HOME/.local/share/agent100/node-v24.21.0/bin:`$PATH; node --version; git --version || (echo 'no git in WSL'); cd ~ && rm -rf try && git clone -q https://github.com/$repo try && cd try && git checkout -q $sha && node test.mjs --port 4796 --cmd 'npx -y github:$repo#$sha'"
+          wsl.exe --cd ~ --exec bash -lc "export PATH=`$HOME/.local/share/agent100/node-v24.21.0/bin:`$PATH; node --version; git --version || (echo 'no git in WSL'); cd ~ && rm -rf try && git clone -q https://github.com/$repo try && cd try && git checkout -q $sha && node test.mjs --port 4796 --cmd 'npx -y https://github.com/$repo/archive/$sha.tar.gz'"
           exit $LASTEXITCODE

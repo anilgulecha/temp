@@ -15,7 +15,7 @@ Agent 100 gives a lab page in the browser **real bash and files on your computer
 You need Node 20 or later.
 
 ```sh
-npx -y github:anilgulecha/temp
+npx -y https://github.com/anilgulecha/temp/archive/main.tar.gz
 ```
 
 It prints a code such as `a100-4777-…` for the lab page. Ctrl-C stops it. On Windows, run it in PowerShell; it runs inside WSL. If you already use WSL, you can also run the same command inside it.
@@ -25,7 +25,7 @@ It prints a code such as `a100-4777-…` for the lab page. Ctrl-C stops it. On W
 ```sh
 git clone https://github.com/anilgulecha/temp && cd temp
 node test.mjs                                             # this checkout, in a throwaway home folder
-node test.mjs --cmd "npx -y github:anilgulecha/temp"      # through npx, as a student runs it
+node test.mjs --cmd "npx -y https://github.com/anilgulecha/temp/archive/main.tar.gz"      # through npx, as a student runs it
 node test.mjs --no-home --cmd "node a100.mjs"             # Windows: Agent 100 runs in WSL with its own home
 ```
 
